@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { useAuth } from '../../contexts/DummyAuthContext';
+import { useAuth } from '../../contexts/SupabaseContext';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 
@@ -14,7 +14,7 @@ const Header = ({ title, showBack = false, onBack, actions }) => {
   };
 
   return (
-    <motion.header 
+    <motion.header
       initial={{ y: -50, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       className="bg-white shadow-lg border-b border-gray-100 sticky top-0 z-50"
@@ -48,7 +48,7 @@ const Header = ({ title, showBack = false, onBack, actions }) => {
                 <div className="flex items-center space-x-2 px-3 py-1 bg-gray-100 rounded-full">
                   <SafeIcon icon={FiUser} className="w-4 h-4 text-gray-600" />
                   <span className="text-sm text-gray-700">
-                    {user.phoneNumber || 'User'}
+                    {user.phone || 'User'}
                   </span>
                 </div>
                 <button

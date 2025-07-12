@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useFirestore, updateDocument, where, orderBy } from '../../contexts/DummyAuthContext';
+import { useAuth } from '../../contexts/SupabaseContext';
 import Header from '../common/Header';
 import Card from '../common/Card';
 import Button from '../common/Button';
@@ -9,9 +9,10 @@ import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { format } from 'date-fns';
 
-const { FiUsers, FiPackage, FiClock, FiCheckCircle } = FiIcons;
+const { FiUsers, FiPackage, FiClock, FiCheckCircle, FiTool, FiUser } = FiIcons;
 
 const AdminDashboard = () => {
+  const { useFirestore, updateDocument, where, orderBy, supabase } = useAuth();
   const [activeTab, setActiveTab] = useState('pending');
   const [selectedJob, setSelectedJob] = useState(null);
   const [assigningTailor, setAssigningTailor] = useState(false);
@@ -19,45 +20,145 @@ const AdminDashboard = () => {
     tailorId: '',
     assignmentAmount: ''
   });
+  const [tailors, setTailors] = useState([]);
+  const [loadingTailors, setLoadingTailors] = useState(true);
 
-  const { documents: pendingJobs, loading: pendingLoading } = useFirestore('jobs', [
-    where('status', '==', 'Pending Assignment'),
-    orderBy('createdAt', 'desc')
-  ]);
+  // Fetch tailors directly using Supabase client
+  useEffect(() => {
+    const fetchTailors = async () => {
+      try {
+        setLoadingTailors(true);
+        // Insert demo tailors if needed
+        await supabase.from('users_tc').upsert([
+          {
+            id: '00000000-0000-4000-a000-000000000001',
+            phone_number: '+91 98765 43212',
+            role: 'tailor'
+          },
+          {
+            id: '00000000-0000-4000-a000-000000000002',
+            phone_number: '+91 98765 43213',
+            role: 'tailor'
+          }
+        ], { onConflict: 'id' });
 
-  const { documents: activeJobs, loading: activeLoading } = useFirestore('jobs', [
-    where('status', 'in', ['Assigned', 'In Progress']),
-    orderBy('createdAt', 'desc')
-  ]);
+        // Fetch tailors
+        const { data, error } = await supabase
+          .from('users_tc')
+          .select('*')
+          .eq('role', 'tailor');
+          
+        if (error) {
+          console.error('Error fetching tailors:', error);
+          throw error;
+        }
+        
+        console.log('Fetched tailors:', data);
+        setTailors(data || []);
+      } catch (err) {
+        console.error('Error in tailor setup:', err);
+      } finally {
+        setLoadingTailors(false);
+      }
+    };
+    
+    fetchTailors();
+  }, [supabase]);
 
-  const { documents: completedJobs, loading: completedLoading } = useFirestore('jobs', [
-    where('status', '==', 'Completed'),
-    orderBy('createdAt', 'desc')
-  ]);
+  // Fetch jobs by status
+  const { documents: pendingJobs, loading: pendingLoading } = useFirestore(
+    'jobs_tc',
+    [
+      where('status', '==', 'Pending Assignment'),
+      orderBy('created_at', 'desc')
+    ]
+  );
 
-  const { documents: tailors, loading: tailorsLoading } = useFirestore('users', [
-    where('role', '==', 'tailor')
-  ]);
+  const { documents: activeJobs, loading: activeLoading } = useFirestore(
+    'jobs_tc',
+    [
+      where('status', 'in', ['Assigned', 'In Progress']),
+      orderBy('created_at', 'desc')
+    ]
+  );
+
+  const { documents: completedByTailorJobs, loading: completedByTailorLoading } = useFirestore(
+    'jobs_tc',
+    [
+      where('status', '==', 'Completed by Tailor'),
+      orderBy('created_at', 'desc')
+    ]
+  );
+
+  const { documents: completedJobs, loading: completedLoading } = useFirestore(
+    'jobs_tc',
+    [
+      where('status', '==', 'Completed'),
+      orderBy('created_at', 'desc')
+    ]
+  );
 
   const handleAssignTailor = async () => {
     if (!selectedJob || !assignmentData.tailorId || !assignmentData.assignmentAmount) {
+      alert('Please fill all fields');
       return;
     }
 
     try {
       setAssigningTailor(true);
-      await updateDocument('jobs', selectedJob.id, {
-        tailorId: assignmentData.tailorId,
-        assignmentAmount: parseFloat(assignmentData.assignmentAmount),
-        status: 'Assigned'
-      });
-      
+      console.log('Assigning tailor:', assignmentData);
+
+      // Use direct Supabase call for more reliability
+      const { data, error } = await supabase
+        .from('jobs_tc')
+        .update({
+          assigned_tailor_id: assignmentData.tailorId,
+          assignment_amount: parseFloat(assignmentData.assignmentAmount),
+          status: 'Assigned'
+          // Removed updated_at as it's handled by a default value
+        })
+        .eq('id', selectedJob.id)
+        .select();
+
+      if (error) {
+        console.error('Error assigning tailor:', error);
+        throw error;
+      }
+
+      console.log('Tailor assigned successfully:', data);
       setSelectedJob(null);
       setAssignmentData({ tailorId: '', assignmentAmount: '' });
+      alert('Tailor assigned successfully!');
     } catch (error) {
       console.error('Error assigning tailor:', error);
+      alert('Failed to assign tailor: ' + error.message);
     } finally {
       setAssigningTailor(false);
+    }
+  };
+
+  const handleFinalApproval = async (jobId) => {
+    try {
+      // Use direct Supabase call
+      const { data, error } = await supabase
+        .from('jobs_tc')
+        .update({
+          status: 'Completed'
+          // Removed updated_at as it's handled by a default value
+        })
+        .eq('id', jobId)
+        .select();
+
+      if (error) {
+        console.error('Error approving job:', error);
+        throw error;
+      }
+
+      console.log('Job approved successfully:', data);
+      alert('Job approved and marked as completed!');
+    } catch (error) {
+      console.error('Error approving job:', error);
+      alert('Failed to approve job: ' + error.message);
     }
   };
 
@@ -67,6 +168,8 @@ const AdminDashboard = () => {
         return { jobs: pendingJobs, loading: pendingLoading };
       case 'active':
         return { jobs: activeJobs, loading: activeLoading };
+      case 'review':
+        return { jobs: completedByTailorJobs, loading: completedByTailorLoading };
       case 'completed':
         return { jobs: completedJobs, loading: completedLoading };
       default:
@@ -79,6 +182,7 @@ const AdminDashboard = () => {
   const tabs = [
     { id: 'pending', label: 'Pending', icon: FiClock, count: pendingJobs.length },
     { id: 'active', label: 'Active', icon: FiPackage, count: activeJobs.length },
+    { id: 'review', label: 'Review', icon: FiTool, count: completedByTailorJobs.length },
     { id: 'completed', label: 'Completed', icon: FiCheckCircle, count: completedJobs.length }
   ];
 
@@ -89,10 +193,10 @@ const AdminDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header title="Admin Dashboard" />
-
+      
       <div className="max-w-md mx-auto">
         {/* Stats Cards */}
-        <div className="p-4 grid grid-cols-3 gap-3">
+        <div className="p-4 grid grid-cols-2 gap-3">
           <Card className="p-3 text-center">
             <div className="text-2xl font-bold text-yellow-600">{pendingJobs.length}</div>
             <div className="text-xs text-gray-600">Pending</div>
@@ -102,6 +206,10 @@ const AdminDashboard = () => {
             <div className="text-xs text-gray-600">Active</div>
           </Card>
           <Card className="p-3 text-center">
+            <div className="text-2xl font-bold text-purple-600">{completedByTailorJobs.length}</div>
+            <div className="text-xs text-gray-600">Review</div>
+          </Card>
+          <Card className="p-3 text-center">
             <div className="text-2xl font-bold text-green-600">{completedJobs.length}</div>
             <div className="text-xs text-gray-600">Completed</div>
           </Card>
@@ -109,28 +217,57 @@ const AdminDashboard = () => {
 
         {/* Tabs */}
         <div className="px-4 mb-4">
-          <div className="flex bg-white rounded-xl p-1 shadow-sm">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex items-center justify-center space-x-1 py-2 px-3 rounded-lg transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-primary-600 text-white shadow-md'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <SafeIcon icon={tab.icon} className="w-4 h-4" />
-                <span className="text-sm font-medium">{tab.label}</span>
-                {tab.count > 0 && (
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                    activeTab === tab.id ? 'bg-white text-primary-600' : 'bg-gray-200 text-gray-600'
-                  }`}>
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
+          <div className="bg-white rounded-xl p-1 shadow-sm">
+            <div className="grid grid-cols-2 gap-1 mb-2">
+              {tabs.slice(0, 2).map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center justify-center space-x-1 py-2 px-3 rounded-lg transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-primary-600 text-white shadow-md'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <SafeIcon icon={tab.icon} className="w-4 h-4" />
+                  <span className="text-sm font-medium">{tab.label}</span>
+                  {tab.count > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                      activeTab === tab.id
+                        ? 'bg-white text-primary-600'
+                        : 'bg-gray-200 text-gray-600'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {tabs.slice(2).map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center justify-center space-x-1 py-2 px-3 rounded-lg transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-primary-600 text-white shadow-md'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <SafeIcon icon={tab.icon} className="w-4 h-4" />
+                  <span className="text-sm font-medium">{tab.label}</span>
+                  {tab.count > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                      activeTab === tab.id
+                        ? 'bg-white text-primary-600'
+                        : 'bg-gray-200 text-gray-600'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -159,13 +296,13 @@ const AdminDashboard = () => {
                         Order #{job.id.slice(-8)}
                       </p>
                       <p className="text-sm text-gray-600">
-                        {job.customerPhone}
+                        {job.customer_phone}
                       </p>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-primary-600">₹{job.totalPrice}</div>
+                      <div className="font-semibold text-primary-600">₹{job.total_price}</div>
                       <div className="text-sm text-gray-600">
-                        {format(job.deliveryDate.toDate(), 'MMM dd')}
+                        {format(new Date(job.delivery_date), 'MMM dd')}
                       </div>
                     </div>
                   </div>
@@ -173,8 +310,11 @@ const AdminDashboard = () => {
                   {job.addOns && job.addOns.length > 0 && (
                     <div className="mb-3">
                       <div className="flex flex-wrap gap-1">
-                        {job.addOns.map(addon => (
-                          <span key={addon.id} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                        {job.addOns.map((addon, idx) => (
+                          <span
+                            key={addon.id || idx}
+                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                          >
                             {addon.name}
                           </span>
                         ))}
@@ -182,6 +322,7 @@ const AdminDashboard = () => {
                     </div>
                   )}
 
+                  {/* Action Buttons */}
                   {activeTab === 'pending' && (
                     <Button
                       onClick={() => setSelectedJob(job)}
@@ -192,11 +333,23 @@ const AdminDashboard = () => {
                     </Button>
                   )}
 
-                  {job.tailorId && (
+                  {activeTab === 'review' && (
+                    <Button
+                      onClick={() => handleFinalApproval(job.id)}
+                      size="sm"
+                      className="w-full bg-green-600 hover:bg-green-700"
+                    >
+                      Approve & Complete
+                    </Button>
+                  )}
+
+                  {job.assigned_tailor_id && (
                     <div className="mt-2 text-sm text-gray-600">
-                      Assigned to: Tailor #{job.tailorId.slice(-6)}
-                      {job.assignmentAmount && (
-                        <span className="ml-2 text-green-600">₹{job.assignmentAmount}</span>
+                      Assigned to: Tailor #{job.assigned_tailor_id.slice(-6)}
+                      {job.assignment_amount && (
+                        <span className="ml-2 text-green-600">
+                          ₹{job.assignment_amount}
+                        </span>
                       )}
                     </div>
                   )}
@@ -218,24 +371,37 @@ const AdminDashboard = () => {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
               Assign Tailor
             </h3>
-
+            
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Tailor
                 </label>
-                <select
-                  value={assignmentData.tailorId}
-                  onChange={(e) => setAssignmentData(prev => ({ ...prev, tailorId: e.target.value }))}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="">Choose a tailor</option>
-                  {tailors.map(tailor => (
-                    <option key={tailor.id} value={tailor.id}>
-                      {tailor.phoneNumber} - Tailor #{tailor.id.slice(-6)}
-                    </option>
-                  ))}
-                </select>
+                {loadingTailors ? (
+                  <div className="p-3 text-center text-gray-500 border border-gray-300 rounded-lg">
+                    Loading tailors...
+                  </div>
+                ) : tailors.length === 0 ? (
+                  <div className="p-3 text-center text-red-500 border border-red-200 rounded-lg bg-red-50">
+                    No tailors available. Please add tailors first.
+                  </div>
+                ) : (
+                  <select
+                    value={assignmentData.tailorId}
+                    onChange={(e) => setAssignmentData(prev => ({ ...prev, tailorId: e.target.value }))}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Choose a tailor</option>
+                    {tailors.map(tailor => (
+                      <option key={tailor.id} value={tailor.id}>
+                        {tailor.phone_number} - Tailor #{tailor.id.slice(-6)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  {tailors.length} tailor(s) available
+                </p>
               </div>
 
               <div>
@@ -262,7 +428,7 @@ const AdminDashboard = () => {
                 <Button
                   onClick={handleAssignTailor}
                   loading={assigningTailor}
-                  disabled={!assignmentData.tailorId || !assignmentData.assignmentAmount}
+                  disabled={!assignmentData.tailorId || !assignmentData.assignmentAmount || tailors.length === 0}
                   className="flex-1"
                 >
                   Assign

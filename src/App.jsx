@@ -1,6 +1,6 @@
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { DummyAuthProvider, useAuth } from './contexts/DummyAuthContext';
+import { SupabaseProvider, useAuth } from './contexts/SupabaseContext';
 import DummyLogin from './components/auth/DummyLogin';
 import CustomerFlow from './components/customer/CustomerFlow';
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -41,13 +41,13 @@ const AppContent = () => {
 
 function App() {
   return (
-    <DummyAuthProvider>
+    <SupabaseProvider>
       <Router>
         <div className="App">
           <AppContent />
         </div>
       </Router>
-    </DummyAuthProvider>
+    </SupabaseProvider>
   );
 }
 

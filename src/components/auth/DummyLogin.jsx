@@ -5,29 +5,43 @@ import Card from '../common/Card';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 
-const { FiPhone, FiUser } = FiIcons;
+const { FiPhone, FiUser, FiAlertCircle } = FiIcons;
 
 const DummyLogin = ({ onLogin }) => {
   const [selectedRole, setSelectedRole] = useState('customer');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!selectedRole) {
+      setError('Please select a role');
+      return;
+    }
+
     setLoading(true);
+    setError(null);
     
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Create dummy user data
-    const dummyUser = {
-      uid: `dummy_${selectedRole}_${Date.now()}`,
-      phoneNumber: phoneNumber || `+91${Math.floor(Math.random() * 9000000000) + 1000000000}`,
-      role: selectedRole
-    };
-    
-    onLogin(dummyUser);
-    setLoading(false);
+    try {
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Create dummy user data
+      const dummyUser = {
+        uid: `demo_${selectedRole}_${Date.now()}`,
+        phoneNumber: phoneNumber || `+91${Math.floor(Math.random() * 9000000000) + 1000000000}`,
+        role: selectedRole
+      };
+      
+      console.log('Attempting login with:', dummyUser);
+      await onLogin(dummyUser);
+    } catch (error) {
+      console.error('Login error:', error);
+      setError('Login failed: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const quickLoginOptions = [
@@ -35,6 +49,27 @@ const DummyLogin = ({ onLogin }) => {
     { role: 'admin', phone: '+91 98765 43211', label: 'Admin Demo' },
     { role: 'tailor', phone: '+91 98765 43212', label: 'Tailor Demo' }
   ];
+
+  const handleQuickLogin = async (option) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const dummyUser = {
+        uid: `demo_${option.role}_${Date.now()}`,
+        phoneNumber: option.phone,
+        role: option.role
+      };
+      
+      console.log('Quick login with:', dummyUser);
+      await onLogin(dummyUser);
+    } catch (error) {
+      console.error('Quick login error:', error);
+      setError('Login failed: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-secondary-50 flex items-center justify-center p-4">
@@ -59,23 +94,25 @@ const DummyLogin = ({ onLogin }) => {
           </div>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <Card className="p-4 mb-4 bg-red-50 border-red-200">
+            <div className="flex items-center space-x-2 text-red-600">
+              <SafeIcon icon={FiAlertCircle} className="w-5 h-5" />
+              <span className="text-sm">{error}</span>
+            </div>
+          </Card>
+        )}
+
         <Card className="p-6 mb-4">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Demo Login</h3>
           <div className="space-y-2">
             {quickLoginOptions.map((option) => (
               <button
                 key={option.role}
-                onClick={() => {
-                  setSelectedRole(option.role);
-                  setPhoneNumber(option.phone);
-                  const dummyUser = {
-                    uid: `dummy_${option.role}_${Date.now()}`,
-                    phoneNumber: option.phone,
-                    role: option.role
-                  };
-                  onLogin(dummyUser);
-                }}
-                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-primary-600 hover:bg-primary-50 transition-all"
+                onClick={() => handleQuickLogin(option)}
+                disabled={loading}
+                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-primary-600 hover:bg-primary-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -135,9 +172,10 @@ const DummyLogin = ({ onLogin }) => {
             <Button
               type="submit"
               loading={loading}
+              disabled={loading}
               className="w-full"
             >
-              Login as {selectedRole}
+              {loading ? 'Logging in...' : `Login as ${selectedRole}`}
             </Button>
           </form>
         </Card>

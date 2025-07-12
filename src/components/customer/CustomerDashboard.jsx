@@ -1,36 +1,80 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useAuth, useFirestore, where, orderBy } from '../../contexts/DummyAuthContext';
+import { useAuth } from '../../contexts/SupabaseContext';
 import Header from '../common/Header';
 import Card from '../common/Card';
-import LoadingSpinner from '../common/LoadingSpinner';
+import Button from '../common/Button';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { format } from 'date-fns';
+import LoadingSpinner from '../common/LoadingSpinner';
 
-const { FiPlus, FiClock, FiCheckCircle, FiPackage } = FiIcons;
+const { FiPackage, FiMapPin, FiTruck } = FiIcons;
 
 const CustomerDashboard = ({ onNewOrder }) => {
-  const { user } = useAuth();
-  const { documents: jobs, loading } = useFirestore('jobs', [
-    where('customerId', '==', user?.uid || ''),
-    orderBy('createdAt', 'desc')
-  ]);
+  const { userId, supabase } = useAuth();
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'Pending Assignment':
-        return FiClock;
-      case 'Assigned':
-        return FiPackage;
-      case 'In Progress':
-        return FiIcons.FiTool;
-      case 'Completed':
-        return FiCheckCircle;
-      default:
-        return FiClock;
-    }
-  };
+  // Direct Supabase query for better reliability
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        setLoading(true);
+        if (!userId) {
+          console.log('No user ID available for fetching jobs');
+          setJobs([]);
+          return;
+        }
+
+        console.log('Fetching jobs for customer:', userId);
+        const { data, error } = await supabase
+          .from('jobs_tc')
+          .select('*')
+          .eq('customer_id', userId)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Process data to handle JSON fields
+        const processedJobs = (data || []).map(job => {
+          let addOns = [];
+          let measurementData = {};
+          
+          try {
+            addOns = typeof job.add_ons === 'string' 
+              ? JSON.parse(job.add_ons) 
+              : (job.add_ons || []);
+          } catch (e) {
+            console.warn('Error parsing add_ons:', e);
+          }
+          
+          try {
+            measurementData = typeof job.measurement_data === 'string'
+              ? JSON.parse(job.measurement_data)
+              : (job.measurement_data || {});
+          } catch (e) {
+            console.warn('Error parsing measurement_data:', e);
+          }
+          
+          return {
+            ...job,
+            addOns,
+            measurementData
+          };
+        });
+
+        setJobs(processedJobs);
+        console.log('Fetched jobs:', processedJobs.length);
+      } catch (error) {
+        console.error('Error fetching customer jobs:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchJobs();
+  }, [userId, supabase]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -40,10 +84,29 @@ const CustomerDashboard = ({ onNewOrder }) => {
         return 'text-blue-600 bg-blue-50';
       case 'In Progress':
         return 'text-purple-600 bg-purple-50';
+      case 'Completed by Tailor':
+        return 'text-orange-600 bg-orange-50';
       case 'Completed':
         return 'text-green-600 bg-green-50';
       default:
         return 'text-gray-600 bg-gray-50';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'Pending Assignment':
+        return 'Pending Assignment';
+      case 'Assigned':
+        return 'Assigned to Tailor';
+      case 'In Progress':
+        return 'In Progress';
+      case 'Completed by Tailor':
+        return 'Ready for Review';
+      case 'Completed':
+        return 'Delivered';
+      default:
+        return status;
     }
   };
 
@@ -53,18 +116,20 @@ const CustomerDashboard = ({ onNewOrder }) => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header 
-        title="My Orders" 
+      <Header
+        title="My Orders"
         actions={
-          <button
+          <Button
             onClick={onNewOrder}
-            className="p-2 bg-primary-600 text-white rounded-full hover:bg-primary-700 transition-colors"
+            size="sm"
+            className="flex items-center space-x-2"
           >
-            <SafeIcon icon={FiPlus} className="w-5 h-5" />
-          </button>
+            <SafeIcon icon={FiIcons.FiPlus} />
+            <span>New Order</span>
+          </Button>
         }
       />
-
+      
       <div className="max-w-md mx-auto p-4">
         {jobs.length === 0 ? (
           <motion.div
@@ -77,19 +142,10 @@ const CustomerDashboard = ({ onNewOrder }) => {
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No Orders Yet</h3>
             <p className="text-gray-600 mb-6">Start by placing your first tailoring order</p>
-            <button
-              onClick={onNewOrder}
-              className="bg-primary-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-primary-700 transition-colors"
-            >
-              Place New Order
-            </button>
+            <Button onClick={onNewOrder}>Place New Order</Button>
           </motion.div>
         ) : (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-4"
-          >
+          <div className="space-y-4">
             {jobs.map((job, index) => (
               <motion.div
                 key={job.id}
@@ -107,49 +163,58 @@ const CustomerDashboard = ({ onNewOrder }) => {
                         Order #{job.id.slice(-8)}
                       </p>
                     </div>
-                    <div className={`px-3 py-1 rounded-full flex items-center space-x-1 ${getStatusColor(job.status)}`}>
-                      <SafeIcon icon={getStatusIcon(job.status)} className="w-4 h-4" />
-                      <span className="text-sm font-medium">{job.status}</span>
+                    <div className={`px-3 py-1 rounded-full ${getStatusColor(job.status)}`}>
+                      <span className="text-sm font-medium">
+                        {getStatusLabel(job.status)}
+                      </span>
                     </div>
                   </div>
 
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Total Amount</span>
-                      <span className="font-semibold">₹{job.totalPrice}</span>
+                      <span className="font-semibold">₹{job.total_price}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Delivery Date</span>
-                      <span>{format(job.deliveryDate.toDate(), 'MMM dd, yyyy')}</span>
+                      <span>{format(new Date(job.delivery_date), 'MMM dd, yyyy')}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Ordered</span>
-                      <span>{format(job.createdAt.toDate(), 'MMM dd, yyyy')}</span>
-                    </div>
-                    {job.tailorId && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Assigned to</span>
-                        <span>Tailor #{job.tailorId.slice(-6)}</span>
-                      </div>
-                    )}
                   </div>
 
                   {job.addOns && job.addOns.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
-                      <p className="text-sm text-gray-600 mb-1">Add-ons:</p>
                       <div className="flex flex-wrap gap-1">
-                        {job.addOns.map(addon => (
-                          <span key={addon.id} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                        {job.addOns.map((addon, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded"
+                          >
                             {addon.name}
                           </span>
                         ))}
                       </div>
                     </div>
                   )}
+
+                  {/* Measurement Info */}
+                  {job.measurementData && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <p className="text-sm text-gray-600">
+                        Measurements: {job.measurementData.method === 'sample' ? 'Sample Image' : 'Custom Measurements'}
+                      </p>
+                      {job.measurementData.method === 'sample' && job.measurementData.sampleImage && (
+                        <img
+                          src={job.measurementData.sampleImage}
+                          alt="Sample"
+                          className="mt-2 w-20 h-20 object-cover rounded"
+                        />
+                      )}
+                    </div>
+                  )}
                 </Card>
               </motion.div>
             ))}
-          </motion.div>
+          </div>
         )}
       </div>
     </div>

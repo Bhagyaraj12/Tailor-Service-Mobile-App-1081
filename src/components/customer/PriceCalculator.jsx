@@ -7,7 +7,7 @@ import { calculatePrice, getEstimatedDeliveryDate } from '../../utils/priceCalcu
 
 const PriceCalculator = ({ category, design, addOns, onNext, onUpdateDeliveryDate }) => {
   const [deliveryDate, setDeliveryDate] = useState(getEstimatedDeliveryDate());
-  
+
   const pricing = calculatePrice(category, design, addOns, deliveryDate);
 
   const handleDateChange = (e) => {
@@ -38,7 +38,7 @@ const PriceCalculator = ({ category, design, addOns, onNext, onUpdateDeliveryDat
               <span className="text-gray-600">{category.name} - {design?.name}</span>
               <span>₹{pricing.basePrice + pricing.designPrice}</span>
             </div>
-            
+
             {addOns.length > 0 && (
               <div className="space-y-1">
                 {addOns.map(addon => (
@@ -49,15 +49,16 @@ const PriceCalculator = ({ category, design, addOns, onNext, onUpdateDeliveryDat
                 ))}
               </div>
             )}
-            
+
             {pricing.fastDeliveryCharge > 0 && (
               <div className="flex justify-between text-orange-600">
                 <span>Fast Delivery Charge</span>
                 <span>₹{pricing.fastDeliveryCharge}</span>
               </div>
             )}
-            
+
             <hr className="my-2" />
+
             <div className="flex justify-between font-bold text-lg">
               <span>Total</span>
               <span className="text-primary-600">₹{pricing.total}</span>
