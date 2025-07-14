@@ -6,49 +6,53 @@ import CustomerFlow from './components/customer/CustomerFlow';
 import AdminDashboard from './components/admin/AdminDashboard';
 import TailorDashboard from './components/tailor/TailorDashboard';
 import LoadingSpinner from './components/common/LoadingSpinner';
+import InstallPrompt from './components/common/InstallPrompt';
 
 const AppContent = () => {
-  const { user, userRole, loading, login } = useAuth();
+    const { user, userRole, loading, login } = useAuth();
 
-  if (loading) {
-    return <LoadingSpinner text="Loading..." />;
-  }
-
-  if (!user) {
-    return <DummyLogin onLogin={login} />;
-  }
-
-  const getDashboardComponent = () => {
-    switch (userRole) {
-      case 'customer':
-        return <CustomerFlow />;
-      case 'admin':
-        return <AdminDashboard />;
-      case 'tailor':
-        return <TailorDashboard />;
-      default:
-        return <CustomerFlow />;
+    if (loading) {
+        return <LoadingSpinner text="Loading..." />;
     }
-  };
 
-  return (
-    <Routes>
-      <Route path="/" element={getDashboardComponent()} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  );
+    if (!user) {
+        return <DummyLogin onLogin={login} />;
+    }
+
+    const getDashboardComponent = () => {
+        switch (userRole) {
+            case 'customer':
+                return <CustomerFlow />;
+            case 'admin':
+                return <AdminDashboard />;
+            case 'tailor':
+                return <TailorDashboard />;
+            default:
+                return <CustomerFlow />;
+        }
+    };
+
+    return (
+        <>
+            <Routes>
+                <Route path="/" element={getDashboardComponent()} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <InstallPrompt />
+        </>
+    );
 };
 
 function App() {
-  return (
-    <SupabaseProvider>
-      <Router>
-        <div className="App">
-          <AppContent />
-        </div>
-      </Router>
-    </SupabaseProvider>
-  );
+    return (
+        <SupabaseProvider>
+            <Router>
+                <div className="App safari-only">
+                    <AppContent />
+                </div>
+            </Router>
+        </SupabaseProvider>
+    );
 }
 
 export default App;

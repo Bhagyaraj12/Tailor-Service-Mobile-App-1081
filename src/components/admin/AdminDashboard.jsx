@@ -5,11 +5,12 @@ import Header from '../common/Header';
 import Card from '../common/Card';
 import Button from '../common/Button';
 import LoadingSpinner from '../common/LoadingSpinner';
+import OrderDeliveryModal from './OrderDeliveryModal';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 import { format } from 'date-fns';
 
-const { FiUsers, FiPackage, FiClock, FiCheckCircle, FiTool, FiUser } = FiIcons;
+const { FiUsers, FiPackage, FiClock, FiCheckCircle, FiTool, FiUser, FiTruck } = FiIcons;
 
 const AdminDashboard = () => {
   const { useFirestore, updateDocument, where, orderBy, supabase } = useAuth();
@@ -22,12 +23,16 @@ const AdminDashboard = () => {
   });
   const [tailors, setTailors] = useState([]);
   const [loadingTailors, setLoadingTailors] = useState(true);
+  const [addresses, setAddresses] = useState([]);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [selectedDeliveryJob, setSelectedDeliveryJob] = useState(null);
 
-  // Fetch tailors directly using Supabase client
+  // Fetch tailors and addresses
   useEffect(() => {
-    const fetchTailors = async () => {
+    const fetchData = async () => {
       try {
         setLoadingTailors(true);
+        
         // Insert demo tailors if needed
         await supabase.from('users_tc').upsert([
           {
@@ -43,26 +48,31 @@ const AdminDashboard = () => {
         ], { onConflict: 'id' });
 
         // Fetch tailors
-        const { data, error } = await supabase
+        const { data: tailorData, error: tailorError } = await supabase
           .from('users_tc')
           .select('*')
           .eq('role', 'tailor');
           
-        if (error) {
-          console.error('Error fetching tailors:', error);
-          throw error;
-        }
-        
-        console.log('Fetched tailors:', data);
-        setTailors(data || []);
+        if (tailorError) throw tailorError;
+        setTailors(tailorData || []);
+
+        // Fetch all addresses for delivery management
+        const { data: addressData, error: addressError } = await supabase
+          .from('addresses_tc')
+          .select('*');
+          
+        if (addressError) throw addressError;
+        setAddresses(addressData || []);
+
+        console.log('Fetched data:', { tailors: tailorData?.length, addresses: addressData?.length });
       } catch (err) {
-        console.error('Error in tailor setup:', err);
+        console.error('Error fetching data:', err);
       } finally {
         setLoadingTailors(false);
       }
     };
     
-    fetchTailors();
+    fetchData();
   }, [supabase]);
 
   // Fetch jobs by status
@@ -108,22 +118,17 @@ const AdminDashboard = () => {
       setAssigningTailor(true);
       console.log('Assigning tailor:', assignmentData);
 
-      // Use direct Supabase call for more reliability
       const { data, error } = await supabase
         .from('jobs_tc')
         .update({
           assigned_tailor_id: assignmentData.tailorId,
           assignment_amount: parseFloat(assignmentData.assignmentAmount),
           status: 'Assigned'
-          // Removed updated_at as it's handled by a default value
         })
         .eq('id', selectedJob.id)
         .select();
 
-      if (error) {
-        console.error('Error assigning tailor:', error);
-        throw error;
-      }
+      if (error) throw error;
 
       console.log('Tailor assigned successfully:', data);
       setSelectedJob(null);
@@ -139,26 +144,48 @@ const AdminDashboard = () => {
 
   const handleFinalApproval = async (jobId) => {
     try {
-      // Use direct Supabase call
       const { data, error } = await supabase
         .from('jobs_tc')
         .update({
           status: 'Completed'
-          // Removed updated_at as it's handled by a default value
         })
         .eq('id', jobId)
         .select();
 
-      if (error) {
-        console.error('Error approving job:', error);
-        throw error;
-      }
+      if (error) throw error;
 
       console.log('Job approved successfully:', data);
       alert('Job approved and marked as completed!');
     } catch (error) {
       console.error('Error approving job:', error);
       alert('Failed to approve job: ' + error.message);
+    }
+  };
+
+  const handleDeliveryUpdate = async (jobId, deliveryStatus, notes) => {
+    try {
+      const updateData = {
+        delivery_status: deliveryStatus,
+        delivery_notes: notes
+      };
+
+      if (deliveryStatus === 'delivered') {
+        updateData.delivered_at = new Date().toISOString();
+      }
+
+      const { data, error } = await supabase
+        .from('jobs_tc')
+        .update(updateData)
+        .eq('id', jobId)
+        .select();
+
+      if (error) throw error;
+
+      console.log('Delivery status updated:', data);
+      alert(`Order marked as ${deliveryStatus.replace('_', ' ')}!`);
+    } catch (error) {
+      console.error('Error updating delivery status:', error);
+      throw error;
     }
   };
 
@@ -185,6 +212,19 @@ const AdminDashboard = () => {
     { id: 'review', label: 'Review', icon: FiTool, count: completedByTailorJobs.length },
     { id: 'completed', label: 'Completed', icon: FiCheckCircle, count: completedJobs.length }
   ];
+
+  const getDeliveryStatusBadge = (status) => {
+    switch (status) {
+      case 'pending':
+        return <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded">Pending</span>;
+      case 'out_for_delivery':
+        return <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">Out for Delivery</span>;
+      case 'delivered':
+        return <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded">Delivered</span>;
+      default:
+        return null;
+    }
+  };
 
   if (loading && jobs.length === 0) {
     return <LoadingSpinner text="Loading jobs..." />;
@@ -304,6 +344,7 @@ const AdminDashboard = () => {
                       <div className="text-sm text-gray-600">
                         {format(new Date(job.delivery_date), 'MMM dd')}
                       </div>
+                      {job.delivery_status && getDeliveryStatusBadge(job.delivery_status)}
                     </div>
                   </div>
 
@@ -323,25 +364,42 @@ const AdminDashboard = () => {
                   )}
 
                   {/* Action Buttons */}
-                  {activeTab === 'pending' && (
-                    <Button
-                      onClick={() => setSelectedJob(job)}
-                      size="sm"
-                      className="w-full"
-                    >
-                      Assign Tailor
-                    </Button>
-                  )}
+                  <div className="space-y-2">
+                    {activeTab === 'pending' && (
+                      <Button
+                        onClick={() => setSelectedJob(job)}
+                        size="sm"
+                        className="w-full"
+                      >
+                        Assign Tailor
+                      </Button>
+                    )}
 
-                  {activeTab === 'review' && (
-                    <Button
-                      onClick={() => handleFinalApproval(job.id)}
-                      size="sm"
-                      className="w-full bg-green-600 hover:bg-green-700"
-                    >
-                      Approve & Complete
-                    </Button>
-                  )}
+                    {activeTab === 'review' && (
+                      <Button
+                        onClick={() => handleFinalApproval(job.id)}
+                        size="sm"
+                        className="w-full bg-green-600 hover:bg-green-700"
+                      >
+                        Approve & Complete
+                      </Button>
+                    )}
+
+                    {activeTab === 'completed' && (
+                      <Button
+                        onClick={() => {
+                          setSelectedDeliveryJob(job);
+                          setShowDeliveryModal(true);
+                        }}
+                        size="sm"
+                        className="w-full flex items-center justify-center space-x-2"
+                        variant="outline"
+                      >
+                        <SafeIcon icon={FiTruck} className="w-4 h-4" />
+                        <span>Manage Delivery</span>
+                      </Button>
+                    )}
+                  </div>
 
                   {job.assigned_tailor_id && (
                     <div className="mt-2 text-sm text-gray-600">
@@ -399,9 +457,6 @@ const AdminDashboard = () => {
                     ))}
                   </select>
                 )}
-                <p className="mt-1 text-xs text-gray-500">
-                  {tailors.length} tailor(s) available
-                </p>
               </div>
 
               <div>
@@ -437,6 +492,19 @@ const AdminDashboard = () => {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {/* Delivery Management Modal */}
+      {showDeliveryModal && selectedDeliveryJob && (
+        <OrderDeliveryModal
+          job={selectedDeliveryJob}
+          addresses={addresses}
+          onClose={() => {
+            setShowDeliveryModal(false);
+            setSelectedDeliveryJob(null);
+          }}
+          onUpdateDelivery={handleDeliveryUpdate}
+        />
       )}
     </div>
   );

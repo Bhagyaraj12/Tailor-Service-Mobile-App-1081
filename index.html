@@ -1,16 +1,83 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#ec4899" />
     <meta name="description" content="Professional tailoring services at your fingertips" />
+    
+    <!-- iOS Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TailorCraft">
+    
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/icons/apple-icon-180.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-icon-152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-icon-180.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-icon-167.png">
+    
+    <!-- Include Splash Screens -->
+    <link rel="import" href="/apple-splash-screens.html">
+    
     <title>TailorCraft - Professional Tailoring Services</title>
     <link rel="manifest" href="/manifest.json" />
-  </head>
-  <body>
+    
+    <style>
+        /* Prevent pull-to-refresh and overscroll */
+        html, body {
+            overscroll-behavior-y: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #root {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        /* Hide Safari UI elements */
+        @supports (-webkit-touch-callout: none) {
+            .safari-only {
+                padding-top: env(safe-area-inset-top);
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+        }
+    </style>
+</head>
+<body class="safari-only">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-  </body>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful');
+                    })
+                    .catch(err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+        
+        // Prevent bounce effect on iOS
+        document.addEventListener('touchmove', (e) => {
+            if (e.target.closest('#root')) return;
+            e.preventDefault();
+        }, { passive: false });
+        
+        // Handle iOS PWA installation prompt
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            // Show install button or prompt
+        });
+    </script>
+</body>
 </html>

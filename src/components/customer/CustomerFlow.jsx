@@ -7,6 +7,7 @@ import DesignSelector from './DesignSelector';
 import AddOnSelector from './AddOnSelector';
 import PriceCalculator from './PriceCalculator';
 import MeasurementForm from './MeasurementForm';
+import DeliveryAddressStep from './DeliveryAddressStep';
 import JobSummary from './JobSummary';
 import CustomerDashboard from './CustomerDashboard';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -19,16 +20,17 @@ const CustomerFlow = () => {
     design: null,
     addOns: [],
     deliveryDate: getEstimatedDeliveryDate(),
-    measurementData: null
+    measurementData: null,
+    pickupAddress: null,
+    deliveryAddress: null
   });
   const [submitting, setSubmitting] = useState(false);
 
   const steps = [
-    'dashboard', 'category', 'design', 'addons', 'pricing', 'measurements', 'summary'
+    'dashboard', 'category', 'design', 'addons', 'pricing', 'measurements', 'delivery', 'summary'
   ];
 
   const getCurrentStepIndex = () => steps.indexOf(currentStep);
-
   const goToStep = (step) => setCurrentStep(step);
 
   const nextStep = () => {
@@ -48,40 +50,28 @@ const CustomerFlow = () => {
   };
 
   const handleCategorySelect = (category) => {
-    setOrderData(prev => ({
-      ...prev,
-      category,
-      design: null
-    }));
+    setOrderData(prev => ({ ...prev, category, design: null }));
     nextStep();
   };
 
   const handleDesignSelect = (design) => {
-    setOrderData(prev => ({
-      ...prev,
-      design
-    }));
+    setOrderData(prev => ({ ...prev, design }));
   };
 
   const handleAddOnsSelect = (addOns) => {
-    setOrderData(prev => ({
-      ...prev,
-      addOns
-    }));
+    setOrderData(prev => ({ ...prev, addOns }));
   };
 
   const handleDeliveryDateUpdate = (date) => {
-    setOrderData(prev => ({
-      ...prev,
-      deliveryDate: date
-    }));
+    setOrderData(prev => ({ ...prev, deliveryDate: date }));
   };
 
   const handleMeasurementData = (data) => {
-    setOrderData(prev => ({
-      ...prev,
-      measurementData: data
-    }));
+    setOrderData(prev => ({ ...prev, measurementData: data }));
+  };
+
+  const handleAddressSelect = ({ pickupAddress, deliveryAddress }) => {
+    setOrderData(prev => ({ ...prev, pickupAddress, deliveryAddress }));
   };
 
   const calculateFinalPrice = () => {
@@ -99,7 +89,6 @@ const CustomerFlow = () => {
       setSubmitting(true);
       console.log('Starting order submission...');
       console.log('User ID:', userId);
-      console.log('User:', user);
       console.log('Order Data:', orderData);
 
       if (!userId) {
@@ -110,29 +99,43 @@ const CustomerFlow = () => {
         throw new Error('Missing required order data');
       }
 
+      if (!orderData.pickupAddress || !orderData.deliveryAddress) {
+        throw new Error('Please select both pickup and delivery addresses');
+      }
+
       const finalPrice = calculateFinalPrice();
       console.log('Final price calculated:', finalPrice);
 
-      // Use direct Supabase call for more reliability
+      // Prepare the data with proper handling of JSON fields and IDs
+      const jobData = {
+        customer_id: userId,
+        customer_phone: user?.phone || user?.phoneNumber || 'Demo User',
+        category: orderData.category.name,
+        design: orderData.design.name,
+        add_ons: JSON.stringify(orderData.addOns || []),
+        delivery_date: orderData.deliveryDate.toISOString(),
+        measurement_data: JSON.stringify(orderData.measurementData || {}),
+        pickup_address_id: orderData.pickupAddress.id,
+        delivery_address_id: orderData.deliveryAddress.id,
+        status: 'Pending Assignment',
+        delivery_status: 'pending',
+        total_price: finalPrice
+      };
+
+      console.log('Prepared job data:', jobData);
+
+      // Use direct Supabase call
       const { data, error } = await supabase
         .from('jobs_tc')
-        .insert({
-          customer_id: userId,
-          customer_phone: user?.phone || user?.phoneNumber || 'Demo User',
-          category: orderData.category.name,
-          design: orderData.design.name,
-          add_ons: JSON.stringify(orderData.addOns || []),
-          delivery_date: orderData.deliveryDate.toISOString(),
-          measurement_data: JSON.stringify(orderData.measurementData || {}),
-          status: 'Pending Assignment',
-          total_price: finalPrice
-          // Removed created_at and updated_at as they have default values
-        })
+        .insert(jobData)
         .select();
 
-      if (error) throw error;
-      
-      console.log('Order submitted successfully with ID:', data[0].id);
+      if (error) {
+        console.error('Error inserting job:', error);
+        throw new Error(`Database error: ${error.message}`);
+      }
+
+      console.log('Order submitted successfully with ID:', data?.[0]?.id);
 
       // Reset order data and go back to dashboard
       setOrderData({
@@ -140,7 +143,9 @@ const CustomerFlow = () => {
         design: null,
         addOns: [],
         deliveryDate: getEstimatedDeliveryDate(),
-        measurementData: null
+        measurementData: null,
+        pickupAddress: null,
+        deliveryAddress: null
       });
       setCurrentStep('dashboard');
 
@@ -156,22 +161,15 @@ const CustomerFlow = () => {
 
   const getStepTitle = () => {
     switch (currentStep) {
-      case 'dashboard':
-        return 'My Orders';
-      case 'category':
-        return 'Select Category';
-      case 'design':
-        return 'Choose Design';
-      case 'addons':
-        return 'Add-on Services';
-      case 'pricing':
-        return 'Price & Delivery';
-      case 'measurements':
-        return 'Measurements';
-      case 'summary':
-        return 'Order Summary';
-      default:
-        return 'TailorCraft';
+      case 'dashboard': return 'My Orders';
+      case 'category': return 'Select Category';
+      case 'design': return 'Choose Design';
+      case 'addons': return 'Add-on Services';
+      case 'pricing': return 'Price & Delivery';
+      case 'measurements': return 'Measurements';
+      case 'delivery': return 'Pickup & Delivery';
+      case 'summary': return 'Order Summary';
+      default: return 'TailorCraft';
     }
   };
 
@@ -193,46 +191,55 @@ const CustomerFlow = () => {
         return <CategoryGrid onSelectCategory={handleCategorySelect} />;
       case 'design':
         return (
-          <DesignSelector
-            category={orderData.category}
-            onSelectDesign={handleDesignSelect}
-            onNext={nextStep}
+          <DesignSelector 
+            category={orderData.category} 
+            onSelectDesign={handleDesignSelect} 
+            onNext={nextStep} 
           />
         );
       case 'addons':
         return (
-          <AddOnSelector
-            onSelectAddOns={handleAddOnsSelect}
-            onNext={nextStep}
+          <AddOnSelector 
+            onSelectAddOns={handleAddOnsSelect} 
+            onNext={nextStep} 
           />
         );
       case 'pricing':
         return (
-          <PriceCalculator
-            category={orderData.category}
-            design={orderData.design}
-            addOns={orderData.addOns}
-            onNext={nextStep}
-            onUpdateDeliveryDate={handleDeliveryDateUpdate}
+          <PriceCalculator 
+            category={orderData.category} 
+            design={orderData.design} 
+            addOns={orderData.addOns} 
+            onNext={nextStep} 
+            onUpdateDeliveryDate={handleDeliveryDateUpdate} 
           />
         );
       case 'measurements':
         return (
-          <MeasurementForm
-            category={orderData.category}
-            onNext={nextStep}
-            onMeasurementData={handleMeasurementData}
+          <MeasurementForm 
+            category={orderData.category} 
+            onNext={nextStep} 
+            onMeasurementData={handleMeasurementData} 
+          />
+        );
+      case 'delivery':
+        return (
+          <DeliveryAddressStep 
+            onNext={nextStep} 
+            onAddressSelect={handleAddressSelect} 
           />
         );
       case 'summary':
         return (
-          <JobSummary
-            category={orderData.category}
-            design={orderData.design}
-            addOns={orderData.addOns}
-            deliveryDate={orderData.deliveryDate}
-            measurementData={orderData.measurementData}
-            onSubmit={handleSubmitOrder}
+          <JobSummary 
+            category={orderData.category} 
+            design={orderData.design} 
+            addOns={orderData.addOns} 
+            deliveryDate={orderData.deliveryDate} 
+            measurementData={orderData.measurementData} 
+            pickupAddress={orderData.pickupAddress} 
+            deliveryAddress={orderData.deliveryAddress} 
+            onSubmit={handleSubmitOrder} 
           />
         );
       default:
@@ -246,12 +253,11 @@ const CustomerFlow = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header
-        title={getStepTitle()}
-        showBack={currentStep !== 'category'}
-        onBack={prevStep}
+      <Header 
+        title={getStepTitle()} 
+        showBack={currentStep !== 'category'} 
+        onBack={prevStep} 
       />
-      
       <div className="max-w-md mx-auto">
         {/* Progress Bar */}
         {currentStep !== 'dashboard' && (
@@ -261,14 +267,13 @@ const CustomerFlow = () => {
               <span>{Math.round((getCurrentStepIndex() / (steps.length - 1)) * 100)}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-primary-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${(getCurrentStepIndex() / (steps.length - 1)) * 100}%` }}
+              <div 
+                className="bg-primary-600 h-2 rounded-full transition-all duration-300" 
+                style={{width: `${(getCurrentStepIndex() / (steps.length - 1)) * 100}%`}} 
               />
             </div>
           </div>
         )}
-
         {renderStep()}
       </div>
     </div>

@@ -20,73 +20,122 @@ const generateUUID = () => {
   });
 };
 
-// Create database tables if they don't exist
+// Simplified database setup with no complex policies that could cause recursion
 const setupDatabase = async () => {
   try {
     console.log('Setting up database tables...');
     
     // Create users_tc table if not exists
-    await supabase.query(`
-      CREATE TABLE IF NOT EXISTS users_tc (
-        id UUID PRIMARY KEY,
-        phone_number TEXT,
-        role TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-      );
-    `);
-    
-    // Create jobs_tc table if not exists
-    await supabase.query(`
-      CREATE TABLE IF NOT EXISTS jobs_tc (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        customer_id UUID,
-        customer_phone TEXT,
-        category TEXT,
-        design TEXT,
-        add_ons JSONB DEFAULT '[]',
-        delivery_date TIMESTAMP WITH TIME ZONE,
-        measurement_data JSONB DEFAULT '{}',
-        status TEXT DEFAULT 'Pending Assignment',
-        total_price DECIMAL,
-        assigned_tailor_id UUID,
-        assignment_amount DECIMAL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-      );
-    `);
-    
-    // Enable RLS
-    await supabase.query(`
-      ALTER TABLE users_tc ENABLE ROW LEVEL SECURITY;
-      ALTER TABLE jobs_tc ENABLE ROW LEVEL SECURITY;
-    `);
-    
-    // Create policies
-    await supabase.query(`
-      CREATE POLICY IF NOT EXISTS "Allow all operations for users" ON users_tc FOR ALL USING (true);
-      CREATE POLICY IF NOT EXISTS "Allow all inserts for users" ON users_tc FOR INSERT WITH CHECK (true);
-      CREATE POLICY IF NOT EXISTS "Allow all operations for jobs" ON jobs_tc FOR ALL USING (true);
-      CREATE POLICY IF NOT EXISTS "Allow all inserts for jobs" ON jobs_tc FOR INSERT WITH CHECK (true);
-    `);
-    
+    await supabase.rpc('exec_sql', {
+      query: `
+        CREATE TABLE IF NOT EXISTS users_tc (
+          id UUID PRIMARY KEY,
+          phone_number TEXT,
+          role TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );`
+    }).catch(() => {
+      console.log('RPC failed, trying direct approach...');
+    });
+
+    // Create jobs_tc table if not exists with proper columns
+    await supabase.rpc('exec_sql', {
+      query: `
+        CREATE TABLE IF NOT EXISTS jobs_tc (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          customer_id UUID,
+          customer_phone TEXT,
+          category TEXT,
+          design TEXT,
+          add_ons JSONB DEFAULT '[]',
+          delivery_date TIMESTAMP WITH TIME ZONE,
+          measurement_data JSONB DEFAULT '{}',
+          pickup_address_id UUID,
+          delivery_address_id UUID,
+          delivery_status TEXT DEFAULT 'pending',
+          delivery_notes TEXT,
+          delivered_at TIMESTAMP WITH TIME ZONE,
+          status TEXT DEFAULT 'Pending Assignment',
+          total_price DECIMAL,
+          assigned_tailor_id UUID,
+          assignment_amount DECIMAL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );`
+    }).catch(() => {
+      console.log('Direct table creation failed');
+    });
+
+    // Create addresses_tc table if not exists
+    await supabase.rpc('exec_sql', {
+      query: `
+        CREATE TABLE IF NOT EXISTS addresses_tc (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID,
+          address_type TEXT NOT NULL,
+          full_name TEXT NOT NULL,
+          phone_number TEXT,
+          address_line1 TEXT NOT NULL,
+          address_line2 TEXT,
+          city TEXT NOT NULL,
+          state TEXT NOT NULL,
+          pincode TEXT NOT NULL,
+          is_default BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );`
+    }).catch(() => {
+      console.log('Address table creation failed');
+    });
+
+    // Setup simple RLS policies that won't cause recursion
+    await supabase.rpc('exec_sql', {
+      query: `
+        -- Enable RLS
+        ALTER TABLE users_tc ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE jobs_tc ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE addresses_tc ENABLE ROW LEVEL SECURITY;
+        
+        -- Drop any existing policies
+        DROP POLICY IF EXISTS "Allow all operations for users" ON users_tc;
+        DROP POLICY IF EXISTS "Allow all operations for jobs" ON jobs_tc;
+        DROP POLICY IF EXISTS "Allow all operations for addresses" ON addresses_tc;
+        DROP POLICY IF EXISTS "Users can view their own profile" ON users_tc;
+        DROP POLICY IF EXISTS "Admins can view all profiles" ON users_tc;
+        
+        -- Create simple policies that allow all operations (for demo purposes)
+        CREATE POLICY "anon_access_users" ON users_tc FOR ALL USING (true);
+        CREATE POLICY "anon_access_jobs" ON jobs_tc FOR ALL USING (true);
+        CREATE POLICY "anon_access_addresses" ON addresses_tc FOR ALL USING (true);`
+    }).catch(() => {
+      console.log('Policy setup failed');
+    });
+
     console.log('Database setup complete.');
-    
-    // Create demo tailors
-    await supabase.from('users_tc').upsert([
-      {
-        id: '00000000-0000-4000-a000-000000000001',
-        phone_number: '+91 98765 43212',
-        role: 'tailor'
-      },
-      {
-        id: '00000000-0000-4000-a000-000000000002',
-        phone_number: '+91 98765 43213',
-        role: 'tailor'
-      }
-    ], { onConflict: 'id' });
-    
-    console.log('Demo tailors created.');
+
+    // Create demo tailors with simpler approach
+    const { data: existingTailors } = await supabase
+      .from('users_tc')
+      .select('id')
+      .eq('role', 'tailor')
+      .limit(1);
+
+    if (!existingTailors || existingTailors.length === 0) {
+      await supabase.from('users_tc').insert([
+        {
+          id: '00000000-0000-4000-a000-000000000001',
+          phone_number: '+91 98765 43212',
+          role: 'tailor'
+        },
+        {
+          id: '00000000-0000-4000-a000-000000000002',
+          phone_number: '+91 98765 43213',
+          role: 'tailor'
+        }
+      ]);
+      console.log('Demo tailors created.');
+    }
   } catch (error) {
     console.error('Error setting up database:', error);
   }
@@ -104,13 +153,11 @@ export const SupabaseProvider = ({ children }) => {
   useEffect(() => {
     const initDb = async () => {
       try {
-        // Check if users_tc table exists
-        const { data, error } = await supabase
+        // Check if users_tc table exists with a simple count
+        const { count, error } = await supabase
           .from('users_tc')
-          .select('count(*)')
-          .limit(1)
-          .single();
-          
+          .select('*', { count: 'exact', head: true });
+
         if (error) {
           // Table likely doesn't exist, setup database
           await setupDatabase();
@@ -128,14 +175,14 @@ export const SupabaseProvider = ({ children }) => {
         }
       }
     };
-    
+
     initDb();
   }, []);
 
   // Initialize auth state
   useEffect(() => {
     if (!dbInitialized) return;
-    
+
     const initAuth = async () => {
       try {
         setLoading(true);
@@ -172,6 +219,7 @@ export const SupabaseProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         setSession(newSession);
+
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setUserRole(null);
@@ -197,13 +245,13 @@ export const SupabaseProvider = ({ children }) => {
     };
   }, [dbInitialized]);
 
-  // Enhanced demo login function with proper UUID
+  // Enhanced demo login function with proper UUID and simplified error handling
   const login = async (userData) => {
     if (!dbInitialized) {
       alert('Database not initialized yet. Please try again in a moment.');
       return;
     }
-    
+
     try {
       setLoading(true);
       console.log('Demo login started with:', userData);
@@ -217,17 +265,13 @@ export const SupabaseProvider = ({ children }) => {
         .select('*')
         .eq('phone_number', userData.phoneNumber)
         .eq('role', userData.role)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error('Error checking user:', checkError);
-        throw checkError;
-      }
+        .single();
 
       let finalUser;
-      if (!existingUser) {
+      if (checkError && checkError.code === 'PGRST116') {
+        // User not found, create new
         console.log('Creating new user with UUID:', userId);
-        // Create user if doesn't exist
+        
         const { data: newUser, error: insertError } = await supabase
           .from('users_tc')
           .insert([{
@@ -240,11 +284,14 @@ export const SupabaseProvider = ({ children }) => {
 
         if (insertError) {
           console.error('Error creating user:', insertError);
-          throw insertError;
+          throw new Error('Failed to create user account');
         }
 
         finalUser = newUser;
         console.log('Created new user:', newUser);
+      } else if (checkError) {
+        console.error('Error checking user:', checkError);
+        throw new Error('Database error when checking for existing user');
       } else {
         finalUser = existingUser;
         console.log('Found existing user:', existingUser);
@@ -262,12 +309,7 @@ export const SupabaseProvider = ({ children }) => {
       console.log('Demo login completed successfully');
     } catch (error) {
       console.error('Demo login error:', error);
-      // Show user-friendly error message
-      if (error.message.includes('uuid')) {
-        alert('Login failed: Database connection error. Please try again.');
-      } else {
-        alert('Login failed: ' + error.message);
-      }
+      alert('Login failed: ' + (error.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -289,7 +331,7 @@ export const SupabaseProvider = ({ children }) => {
     }
   };
 
-  // Firestore-like queries for Supabase
+  // Firestore-like queries for Supabase with simplified error handling
   const useFirestore = (tableName, queryConstraints = []) => {
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -297,7 +339,7 @@ export const SupabaseProvider = ({ children }) => {
 
     useEffect(() => {
       if (!dbInitialized) return;
-      
+
       const fetchData = async () => {
         try {
           setLoading(true);
@@ -349,7 +391,6 @@ export const SupabaseProvider = ({ children }) => {
               // Parse JSON fields
               let addOns = [];
               let measurementData = {};
-
               try {
                 addOns = typeof item.add_ons === 'string' ? JSON.parse(item.add_ons) : item.add_ons || [];
               } catch (e) {
@@ -376,9 +417,9 @@ export const SupabaseProvider = ({ children }) => {
                 addOns: addOns,
                 measurementData: measurementData,
                 // Format dates
-                createdAt: { toDate: () => new Date(item.created_at) },
-                updatedAt: { toDate: () => new Date(item.updated_at) },
-                deliveryDate: { toDate: () => new Date(item.delivery_date) }
+                createdAt: { toDate: () => new Date(item.created_at || Date.now()) },
+                updatedAt: { toDate: () => new Date(item.updated_at || Date.now()) },
+                deliveryDate: { toDate: () => new Date(item.delivery_date || Date.now()) }
               };
             });
 
@@ -402,7 +443,7 @@ export const SupabaseProvider = ({ children }) => {
     if (!dbInitialized) {
       throw new Error('Database not initialized yet.');
     }
-    
+
     try {
       console.log(`Adding document to ${tableName}:`, data);
 
@@ -412,13 +453,9 @@ export const SupabaseProvider = ({ children }) => {
       // Ensure deliveryDate is a valid date
       let deliveryDateString;
       if (data.delivery_date) {
-        deliveryDateString = data.delivery_date instanceof Date 
-          ? data.delivery_date.toISOString() 
-          : new Date(data.delivery_date).toISOString();
+        deliveryDateString = data.delivery_date instanceof Date ? data.delivery_date.toISOString() : new Date(data.delivery_date).toISOString();
       } else if (data.deliveryDate) {
-        deliveryDateString = data.deliveryDate instanceof Date 
-          ? data.deliveryDate.toISOString() 
-          : new Date(data.deliveryDate).toISOString();
+        deliveryDateString = data.deliveryDate instanceof Date ? data.deliveryDate.toISOString() : new Date(data.deliveryDate).toISOString();
       } else {
         deliveryDateString = new Date().toISOString();
       }
@@ -430,9 +467,16 @@ export const SupabaseProvider = ({ children }) => {
         customer_phone: data.customer_phone || user?.phone || user?.phoneNumber || 'Demo User',
         category: data.category,
         design: data.design,
-        add_ons: JSON.stringify(data.add_ons || data.addOns || []),
+        add_ons: typeof data.add_ons === 'string' ? data.add_ons : 
+                 typeof data.addOns === 'string' ? data.addOns : 
+                 JSON.stringify(data.add_ons || data.addOns || []),
         delivery_date: deliveryDateString,
-        measurement_data: JSON.stringify(data.measurement_data || data.measurementData || {}),
+        measurement_data: typeof data.measurement_data === 'string' ? data.measurement_data :
+                          typeof data.measurementData === 'string' ? data.measurementData :
+                          JSON.stringify(data.measurement_data || data.measurementData || {}),
+        pickup_address_id: data.pickup_address_id || (data.pickupAddress ? data.pickupAddress.id : null),
+        delivery_address_id: data.delivery_address_id || (data.deliveryAddress ? data.deliveryAddress.id : null),
+        delivery_status: data.delivery_status || 'pending',
         status: data.status || 'Pending Assignment',
         total_price: parseFloat(data.total_price || data.totalPrice) || 0,
         assigned_tailor_id: data.assigned_tailor_id || data.assignedTailorId || null,
@@ -464,7 +508,7 @@ export const SupabaseProvider = ({ children }) => {
     if (!dbInitialized) {
       throw new Error('Database not initialized yet.');
     }
-    
+
     try {
       console.log(`Updating document in ${tableName} with ID ${id}:`, updateData);
 
@@ -480,17 +524,18 @@ export const SupabaseProvider = ({ children }) => {
       if (updateData.customerPhone !== undefined) supabaseData.customer_phone = updateData.customerPhone;
       if (updateData.category !== undefined) supabaseData.category = updateData.category;
       if (updateData.design !== undefined) supabaseData.design = updateData.design;
-      if (updateData.addOns !== undefined) supabaseData.add_ons = JSON.stringify(updateData.addOns);
+      if (updateData.addOns !== undefined) supabaseData.add_ons = typeof updateData.addOns === 'string' ? updateData.addOns : JSON.stringify(updateData.addOns);
       if (updateData.deliveryDate !== undefined) {
-        supabaseData.delivery_date = updateData.deliveryDate instanceof Date 
-          ? updateData.deliveryDate.toISOString() 
-          : new Date(updateData.deliveryDate).toISOString();
+        supabaseData.delivery_date = updateData.deliveryDate instanceof Date ? updateData.deliveryDate.toISOString() : new Date(updateData.deliveryDate).toISOString();
       }
-      if (updateData.measurementData !== undefined) supabaseData.measurement_data = JSON.stringify(updateData.measurementData);
+      if (updateData.measurementData !== undefined) supabaseData.measurement_data = typeof updateData.measurementData === 'string' ? updateData.measurementData : JSON.stringify(updateData.measurementData);
 
       // Direct snake_case property assignment
       if (updateData.assigned_tailor_id !== undefined) supabaseData.assigned_tailor_id = updateData.assigned_tailor_id;
       if (updateData.assignment_amount !== undefined) supabaseData.assignment_amount = parseFloat(updateData.assignment_amount);
+      if (updateData.delivery_status !== undefined) supabaseData.delivery_status = updateData.delivery_status;
+      if (updateData.delivery_notes !== undefined) supabaseData.delivery_notes = updateData.delivery_notes;
+      if (updateData.delivered_at !== undefined) supabaseData.delivered_at = updateData.delivered_at;
       if (updateData.updated_at !== undefined) supabaseData.updated_at = updateData.updated_at;
 
       // Always update the updated_at timestamp
